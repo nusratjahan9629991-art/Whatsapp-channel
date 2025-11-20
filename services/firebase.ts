@@ -1,9 +1,12 @@
 
-import { initializeApp } from 'firebase/app';
+import * as firebaseApp from 'firebase/app';
 import { getDatabase, ref, push, set, onValue, off, update, remove, onChildAdded, onChildChanged, onChildRemoved } from 'firebase/database';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FIREBASE_CONFIG } from '../constants';
 import { Message } from '../types';
+
+// Workaround for TS error: "Module 'firebase/app' has no exported member 'initializeApp'"
+const initializeApp = (firebaseApp as any).initializeApp;
 
 const app = initializeApp(FIREBASE_CONFIG);
 export const db = getDatabase(app);

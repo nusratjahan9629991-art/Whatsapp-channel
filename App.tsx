@@ -1,5 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
+import { ref, get } from 'firebase/database'; // Added Firebase imports
+import { db } from './services/firebase'; // Added db import
 import { ViewState, OverlayState, ChatSession } from './types';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Button from './components/Button';
@@ -9,10 +11,9 @@ import FriendProfileView from './components/FriendProfileView';
 import { ConnectGuideOverlay } from './components/ConnectGuideOverlay';
 import { Profile } from './components/Profile';
 import { Wallet } from './components/Wallet';
-import Inbox from './components/Inbox'; // Import the new component
+import Inbox from './components/Inbox';
 
-// --- Sub-components for views ---
-
+// --- Sub-components for views (HomeView remains unchanged) ---
 const HomeView: React.FC<{ onOpenEarning: () => void; onOpenInbox: () => void; onAddFriend: () => void }> = ({ onOpenEarning, onOpenInbox, onAddFriend }) => (
   <div className="space-y-4">
     {/* Earning Banner */}
@@ -52,9 +53,9 @@ const HomeView: React.FC<{ onOpenEarning: () => void; onOpenInbox: () => void; o
           </div>
           <span className="text-xs font-medium text-gray-600">Group</span>
         </button>
-        <button className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-orange-100 transition group">
-           <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center group-hover:scale-110 transition-transform">
-            <i className="fas fa-random text-lg"></i>
+        <button className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-pink-100 transition group">
+           <div className="w-10 h-10 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <i className="fas fa-video text-lg"></i>
           </div>
           <span className="text-xs font-medium text-gray-600">Random</span>
         </button>
@@ -87,12 +88,14 @@ const AppContent = () => {
   const [viewingFriend, setViewingFriend] = useState<{name: string, number: string, avatar?: string} | null>(null);
   const [videoCall, setVideoCall] = useState<{isActive: boolean, isCaller: boolean, isVideo: boolean} | null>(null);
   const [contacts, setContacts] = useState<{number: string, name: string}[]>([]);
-  const [activePhoneNumber, setActivePhoneNumber] = useState('');
+  const [isAddingFriend, setIsAddingFriend] = useState(false);
+  
+  // 🎯 NEW STATE: Stores number temporarily during the guide flow
+  const [tempNumberForGuide, setTempNumberForGuide] = useState('');
 
   // Main Auth Check & Contact Load
   useEffect(() => {
-    // Simplified Check: Only show registration if user is NOT logged in and loading is finished.
-    // We rely solely on user.phoneNumber being present as the source of truth.
+    // 🎯 Final Check: Only show registration if user is NOT logged in and loading is finished.
     if (!user.phoneNumber && !loading) {
         setShowRegistration(true);
     } else {
@@ -104,15 +107,20 @@ const AppContent = () => {
     setContacts(storedContacts);
   }, [user.phoneNumber, loading]);
 
-  // PHASE 1: Start Guide (Stores number, does not register yet)
-  const handleStartGuide = (number: string) => {
-      setActivePhoneNumber(number);
-  };
-
-  // PHASE 2: Finalize Registration (Called by final button only)
+  // FINAL: Finalize Registration (Called by final button only)
   const handleFinalizeRegistration = (number: string) => {
       register(number);
+      // After successful registration, close the overlay
       setShowRegistration(false);
+      setTempNumberForGuide('');
+  };
+
+  // NEW: Initial number submission from ConnectGuideOverlay Phase 1
+  const handleFinalNumberSubmit = (number: string) => {
+      // 1. Store the number temporarily
+      setTempNumberForGuide(number);
+      // 2. The guide overlay itself handles the phase transition (INPUT -> GUIDE)
+      // No need to set showRegistration(false) here.
   };
 
   const handleForceLogout = () => {
@@ -120,7 +128,8 @@ const AppContent = () => {
       window.location.replace(window.location.origin);
   };
 
-  // Simulate ads
+  // ... (handleWatchAd, handleStartChat, handleViewProfile, handleAddFriendSubmit, handleCall remain unchanged) ...
+  
   const handleWatchAd = () => {
       window.open('https://www.facebook.com/reel', '_blank');
       setTimeout(() => {
@@ -145,29 +154,46 @@ const AppContent = () => {
       setOverlay('FRIEND_PROFILE');
   };
 
-  const handleAddFriendSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddFriendSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
+      setIsAddingFriend(true);
       const formData = new FormData(e.currentTarget);
       const number = formData.get('number') as string;
       const name = formData.get('name') as string || number;
 
       if (number) {
-          const newContact = { number, name };
-          // Check if already exists
-          if (!contacts.some(c => c.number === number)) {
-              const updatedContacts = [...contacts, newContact];
-              setContacts(updatedContacts);
-              localStorage.setItem('wa_friends', JSON.stringify(updatedContacts));
+          try {
+              // 🎯 Firebase Verification: Check if user exists
+              const userSnapshot = await get(ref(db, `users/${number}`));
+              
+              if (userSnapshot.exists()) {
+                  const newContact = { number, name };
+                  // Check if already exists locally
+                  if (!contacts.some(c => c.number === number)) {
+                      const updatedContacts = [...contacts, newContact];
+                      setContacts(updatedContacts);
+                      localStorage.setItem('wa_friends', JSON.stringify(updatedContacts));
+                  }
+                  setShowAddFriendModal(false);
+                  handleStartChat(number, name);
+              } else {
+                  alert("এই ব্যবহারকারী এখনও WhatsApp Channel অ্যাপে নেই।");
+              }
+          } catch (error) {
+              console.error("Error adding friend:", error);
+              alert("Connection error. Please check your internet.");
+          } finally {
+              setIsAddingFriend(false);
           }
-          setShowAddFriendModal(false);
-          handleStartChat(number, name);
+      } else {
+          setIsAddingFriend(false);
       }
   };
 
   const handleCall = (isVideo: boolean) => {
       setVideoCall({ isActive: true, isCaller: true, isVideo });
   };
-
+  
   const renderOverlay = () => {
       if (videoCall?.isActive && activeChat) {
           return (
@@ -262,12 +288,12 @@ const AppContent = () => {
       <ConnectGuideOverlay 
           isOpen={showRegistration} 
           onFinalizeRegistration={handleFinalizeRegistration} 
-          onStartGuide={handleStartGuide}
+          onFinalNumberSubmit={handleFinalNumberSubmit} // 🎯 Prop Updated Here
           onClose={() => {
               // Prevent closing if not logged in
               if (user.phoneNumber) setShowRegistration(false);
           }} 
-          phoneNumber={activePhoneNumber}
+          phoneNumber={tempNumberForGuide}
       />
 
       {/* Add Friend Modal */}
@@ -292,7 +318,9 @@ const AppContent = () => {
                     </div>
                     <div className="flex gap-3 mt-6">
                         <button type="button" onClick={() => setShowAddFriendModal(false)} className="flex-1 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-xl transition">Cancel</button>
-                        <button type="submit" className="flex-1 py-3 bg-wa-light text-white font-bold rounded-xl hover:bg-emerald-600 transition shadow-lg shadow-emerald-200">Add & Chat</button>
+                        <button type="submit" disabled={isAddingFriend} className="flex-1 py-3 bg-wa-light text-white font-bold rounded-xl hover:bg-emerald-600 transition shadow-lg shadow-emerald-200 flex items-center justify-center">
+                             {isAddingFriend ? <i className="fas fa-circle-notch animate-spin"></i> : 'Add & Chat'}
+                        </button>
                     </div>
                 </form>
             </div>
