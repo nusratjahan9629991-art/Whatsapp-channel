@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
 
   return {
-    base: '/Whatsapp-channel/',   // GitHub Pages base path
+    base: '/Whatsapp-channel/',
 
     server: {
       port: 3000,
@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
 
     resolve: {
       alias: {
-        '@': fileURLToPath(new URL('./src', import.meta.url)),
+        '@': fileURLToPath(new URL('./', import.meta.url)), // <-- ROOT
       },
     },
   };
