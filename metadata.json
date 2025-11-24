@@ -1,8 +1,0 @@
-{
-  "name": "WhatsApp Channel Redux",
-  "description": "A modernized, React-based WhatsApp clone featuring wallet earnings, real-time chat using Firebase, video calling capabilities, and AI integration.",
-  "requestFramePermissions": [
-    "camera",
-    "microphone"
-  ]
-}
