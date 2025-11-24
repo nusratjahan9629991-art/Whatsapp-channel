@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  contents: write   # GitHub Pages-এ push করার অনুমতি
+  contents: write   # GitHub Pages এ push করার অনুমতি
 
 jobs:
   deploy:
